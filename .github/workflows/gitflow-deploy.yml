@@ -1,0 +1,44 @@
+name: gitflow-deploy
+
+# PR fechado em develop (DEV) ou release/** (HOM): se mergeado, build + deploy simulado
+on:
+  workflow_call:
+    inputs:
+      stack:
+        type: string
+        required: true
+      environment:
+        description: "dev | hom"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/gitflow-build.yml
+    with:
+      stack: ${{ inputs.stack }}
+
+  deploy:
+    needs: build
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - name: Deploy simulado
+        env:
+          TARGET_ENV: ${{ inputs.environment }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          VERSION=$(cat VERSION 2>/dev/null || echo "0.0.0-${SHA::7}")
+          echo "🚀 [SIMULADO] Deploy em ${TARGET_ENV^^}"
+          echo "   versão : $VERSION"
+          echo "   commit : $SHA"
+          echo "   origem : $PR_TITLE"

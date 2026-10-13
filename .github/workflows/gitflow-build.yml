@@ -1,0 +1,35 @@
+name: gitflow-build
+
+# Build por stack, reutilizado por todos os gitflow-*. Deploy é sempre simulado.
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: "ts | java | infra"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  ts:
+    if: inputs.stack == 'ts'
+    uses: ./.github/workflows/ts-ci.yml
+
+  java:
+    if: inputs.stack == 'java'
+    uses: ./.github/workflows/java-ci.yml
+
+  infra:
+    if: inputs.stack == 'infra'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false -backend=false
+      - run: terraform validate

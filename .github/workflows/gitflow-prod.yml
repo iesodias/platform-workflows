@@ -1,0 +1,79 @@
+name: gitflow-prod
+
+# PR editado com base em main: o deploy em PROD só ocorre quando o corpo do PR tem
+#   - [x] Aprovar deploy em PROD
+# Aprovação do deploy fica separada do merge (blue/green / canary).
+on:
+  workflow_call:
+    inputs:
+      stack:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      BODY_CHANGED: ${{ github.event.changes.body != null }}
+    steps:
+      - id: check
+        run: |
+          go=false
+          if [ "$BODY_CHANGED" != "true" ]; then
+            echo "Edição não alterou o corpo do PR; ignorando"
+          elif ! grep -qiE '^- \[x\] Aprovar deploy em PROD' <<<"$PR_BODY"; then
+            echo "Checkbox 'Aprovar deploy em PROD' não marcado; sem deploy"
+          elif gh pr view "$PR_NUMBER" --json comments -q '.comments[].body' | grep -qF "deployed-prod:$HEAD_SHA"; then
+            echo "Deploy de $HEAD_SHA já executado; ignorando (idempotente)"
+          else
+            go=true
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    uses: ./.github/workflows/gitflow-build.yml
+    with:
+      stack: ${{ inputs.stack }}
+
+  deploy:
+    needs: [gate, build]
+    if: needs.gate.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Deploy simulado (canary/blue-green)
+        run: |
+          VERSION=$(cat VERSION 2>/dev/null || echo "0.0.0-${HEAD_SHA::7}")
+          echo "🚀 [SIMULADO] Deploy em PROD (canary/blue-green)"
+          echo "   versão : $VERSION"
+          echo "   commit : $HEAD_SHA"
+          echo "   origem : $HEAD_REF"
+          echo "   próximo: aprovar com issue 'promote' ou reverter com 'rollback'"
+      - name: Registra deploy (idempotência)
+        run: |
+          gh pr comment "$PR_NUMBER" --body "🚀 Deploy em PROD simulado para \`${HEAD_SHA::7}\`. <!-- deployed-prod:$HEAD_SHA -->"

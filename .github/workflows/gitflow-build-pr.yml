@@ -1,0 +1,57 @@
+name: gitflow-build-pr
+
+# push em feature/** -> valida nome da branch, builda e (opcional) abre/atualiza PR para develop
+on:
+  workflow_call:
+    inputs:
+      stack:
+        type: string
+        required: true
+      auto-pr:
+        description: "Abrir PR para develop automaticamente"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Valida convenção feature/HIS-XXXX-NNNNNNN-descricao
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$BRANCH" =~ ^feature/HIS-[0-9]{4}-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "::error::Branch '$BRANCH' fora do padrão feature/HIS-XXXX-NNNNNNN-descricao (ex: feature/HIS-2025-2147154-cobranca-pre-atraso)"
+            exit 1
+          fi
+
+  build:
+    needs: validate-name
+    uses: ./.github/workflows/gitflow-build.yml
+    with:
+      stack: ${{ inputs.stack }}
+
+  open-pr:
+    needs: build
+    if: inputs.auto-pr
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      # PAT necessário para o PR disparar outros workflows (GITHUB_TOKEN não encadeia)
+      GH_TOKEN: ${{ secrets.CI_PAT || github.token }}
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Abre PR para develop se não existir
+        run: |
+          EXISTING=$(gh pr list --head "$BRANCH" --base develop --state open --json number -q '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING já existe para $BRANCH"
+            exit 0
+          fi
+          gh pr create --base develop --head "$BRANCH" \
+            --title "$BRANCH" \
+            --body "PR aberto automaticamente pelo workflow Build & PR para \`$BRANCH\`."

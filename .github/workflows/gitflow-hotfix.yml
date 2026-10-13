@@ -1,0 +1,36 @@
+name: gitflow-hotfix
+
+# push em hotfix/**: pipeline direto para PROD (simulado), pulando o ciclo completo
+on:
+  workflow_call:
+    inputs:
+      stack:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/gitflow-build.yml
+    with:
+      stack: ${{ inputs.stack }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hotfix simulado em PROD
+        env:
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          VERSION=$(cat VERSION 2>/dev/null || echo "0.0.0-${SHA::7}")
+          echo "🔥 [SIMULADO] HOTFIX direto em PROD"
+          echo "   branch : $BRANCH"
+          echo "   versão : $VERSION-hotfix"
+          echo "   commit : $SHA"
+          echo "   lembrete: abrir PR $BRANCH -> main e depois backmerge para develop"

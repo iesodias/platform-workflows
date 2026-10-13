@@ -1,0 +1,30 @@
+name: gitflow-prerelease
+
+# push em pre-release: cria release/<versão> a partir de pre-release
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  create-release-branch:
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cria release/<versão>
+        run: |
+          VERSION=$(cat VERSION 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+          [ -n "$VERSION" ] || VERSION="$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}"
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida: $VERSION"; exit 1; }
+
+          if gh api "repos/$GH_REPO/git/ref/heads/release/$VERSION" >/dev/null 2>&1; then
+            echo "::notice::release/$VERSION já existe; nada a fazer"
+            exit 0
+          fi
+          gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/release/$VERSION" -f sha="$SHA" >/dev/null
+          echo "✅ Criada branch release/$VERSION a partir de pre-release ($SHA)"

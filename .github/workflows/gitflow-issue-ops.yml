@@ -1,0 +1,69 @@
+name: gitflow-issue-ops
+
+# issue aberta com label promote|rollback: lê os campos do Issue Form e executa a ação (simulada)
+# Atenção: workflows com trigger `issues` só rodam a partir da branch default (main).
+on:
+  workflow_call:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  run:
+    if: >-
+      (contains(github.event.issue.labels.*.name, 'promote') || contains(github.event.issue.labels.*.name, 'rollback')) &&
+      contains(fromJSON('["OWNER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      # Corpo da issue é input não confiável: só via env, lido como "$BODY" no shell
+      BODY: ${{ github.event.issue.body }}
+      LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+    steps:
+      - id: act
+        run: |
+          set -euo pipefail
+          fail() { gh issue comment "$ISSUE_NUMBER" --body "❌ $1"; echo "reported=true" >> "$GITHUB_OUTPUT"; exit 1; }
+          field() { awk -v k="$1" '$0=="### "k{f=1;next} /^### /{f=0} f' <<<"$BODY" | sed '/^[[:space:]]*$/d' | head -c 200 | tr -d '\r' | head -1; }
+
+          ENVIRONMENT=$(field Environment)
+          VERSION=$(field "Versão")
+          GMUD=$(field GMUD)
+          [ "$GMUD" = "_No response_" ] && GMUD=""
+
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || fail "Versão inválida."
+          [[ -z "$GMUD" || "$GMUD" =~ ^[A-Za-z0-9._-]{1,32}$ ]] || fail "GMUD inválida."
+
+          case ",$LABELS," in
+            *,rollback,*)
+              ACTION=rollback
+              case "$ENVIRONMENT" in hom|prod) ;; *) fail "Rollback só é permitido em hom ou prod." ;; esac
+              ;;
+            *,promote,*)
+              ACTION=$(field Promote)
+              case "$ACTION" in promote|reject) ;; *) fail "Campo Promote deve ser promote ou reject." ;; esac
+              case "$ENVIRONMENT" in dev|hom|prod) ;; *) fail "Environment inválido." ;; esac
+              ;;
+            *) fail "Issue sem label promote/rollback." ;;
+          esac
+
+          case "$ACTION" in
+            promote)  RESULT="Tráfego promovido para a versão $VERSION em $ENVIRONMENT (simulado)" ;;
+            reject)   RESULT="Versão $VERSION rejeitada em $ENVIRONMENT; tráfego mantido na versão anterior (simulado)" ;;
+            rollback) RESULT="Rollback em $ENVIRONMENT para a última execução com sucesso antes de $VERSION (simulado: kubectl rollout undo deployment/app -n $ENVIRONMENT)" ;;
+          esac
+          echo "[SIMULADO] $RESULT (GMUD: ${GMUD:-n/a})"
+
+          gh issue comment "$ISSUE_NUMBER" --body "✅ **$ACTION** executado — ambiente \`$ENVIRONMENT\`, versão \`$VERSION\`, GMUD \`${GMUD:-n/a}\`.
+          $RESULT"
+          gh issue close "$ISSUE_NUMBER"
+
+      - name: Report failure
+        if: failure() && steps.act.outputs.reported != 'true'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "❌ A execução falhou. Detalhes: $RUN_URL"
