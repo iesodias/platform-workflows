@@ -18,6 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Cria release/<versão>
         run: |
+          MAIN_SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" -q .object.sha)
+          if [ "$MAIN_SHA" = "$SHA" ]; then
+            echo "::notice::pre-release idêntica à main; nada a liberar"
+            exit 0
+          fi
           VERSION=$(cat VERSION 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           [ -n "$VERSION" ] || VERSION="$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}"
           [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida: $VERSION"; exit 1; }
