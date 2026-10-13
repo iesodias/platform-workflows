@@ -31,19 +31,19 @@ jobs:
     needs: source-control
     uses: ./.github/workflows/ci.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
 
   terrascan:
     needs: [source-control, ci]
     uses: ./.github/workflows/terrascan.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
 
   helm-lint:
     needs: [source-control, ci]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "⎈ [SIMULADO] helm lint charts/ (tipo ${{ fromJSON(needs.source-control.outputs.iupipes).deployK8sDeploymentType }})"
+      - run: echo "⎈ [SIMULADO] helm lint charts/ (tipo ${{ fromJSON(needs.source-control.outputs.advpipes).deployK8sDeploymentType }})"
 
   open-pr-to-develop:
     needs: [source-control, ci, terrascan, helm-lint]

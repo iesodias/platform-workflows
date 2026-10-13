@@ -94,7 +94,7 @@ jobs:
     if: ${{ needs.form-to-json.outputs.action == 'promote' || needs.form-to-json.outputs.action == 'reject' }}
     uses: ./.github/workflows/deploy.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: ${{ needs.form-to-json.outputs.environment }}
       version: ${{ needs.form-to-json.outputs.version }}
       deploy-type: ${{ needs.form-to-json.outputs.action }}
@@ -105,7 +105,7 @@ jobs:
     if: ${{ needs.form-to-json.outputs.action == 'rollback' }}
     uses: ./.github/workflows/deploy.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: ${{ needs.form-to-json.outputs.environment }}
       version: ${{ needs.form-to-json.outputs.version }}
       rollback: true

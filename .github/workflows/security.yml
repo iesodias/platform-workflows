@@ -4,7 +4,7 @@ name: security
 on:
   workflow_call:
     inputs:
-      iupipes:
+      advpipes:
         type: string
         required: true
       non-blocking:
@@ -23,8 +23,8 @@ jobs:
   sast:
     runs-on: ubuntu-latest
     env:
-      ENABLED: ${{ fromJSON(inputs.iupipes).securityFortifyEnabled }}
-      SIGLA: ${{ fromJSON(inputs.iupipes).securityFortifySiglaApp }}
+      ENABLED: ${{ fromJSON(inputs.advpipes).securityFortifyEnabled }}
+      SIGLA: ${{ fromJSON(inputs.advpipes).securityFortifySiglaApp }}
       FINDINGS: ${{ inputs.simulate-findings }}
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
         continue-on-error: ${{ inputs.non-blocking }}
         run: |
           if [ "$ENABLED" != "true" ]; then
-            echo "SAST desabilitado no .iupipes.yml"; exit 0
+            echo "SAST desabilitado no .advpipes.yml"; exit 0
           fi
           echo "🔒 [SIMULADO] Fortify SAST — sigla $SIGLA"
           if [ "$FINDINGS" = "true" ]; then

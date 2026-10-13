@@ -10,7 +10,7 @@ on:
         description: "upload | promote"
         type: string
         required: true
-      iupipes:
+      advpipes:
         type: string
         required: true
       environment:
@@ -45,7 +45,7 @@ jobs:
       MODE: ${{ inputs.mode }}
       VERSION_IN: ${{ inputs.version }}
       TARGET_ENV: ${{ inputs.environment }}
-      BUILD_DIR: ${{ fromJSON(inputs.iupipes).buildWorkingDirectory }}
+      BUILD_DIR: ${{ fromJSON(inputs.advpipes).buildWorkingDirectory }}
       RUN_NUMBER: ${{ github.run_number }}
       SHA: ${{ github.sha }}
     steps:

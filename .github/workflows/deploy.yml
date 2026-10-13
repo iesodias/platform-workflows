@@ -4,7 +4,7 @@ name: deploy
 on:
   workflow_call:
     inputs:
-      iupipes:
+      advpipes:
         type: string
         required: true
       environment:
@@ -44,10 +44,10 @@ jobs:
       DEPLOY_TYPE: ${{ inputs.deploy-type }}
       ROLLBACK: ${{ inputs.rollback }}
       CHANGE_ID: ${{ inputs.change-id }}
-      CLUSTER: ${{ fromJSON(inputs.iupipes).cluster }}
-      NAMESPACE: ${{ fromJSON(inputs.iupipes).namespace }}
-      PERCENTAGE: ${{ fromJSON(inputs.iupipes).percentage }}
-      DEPLOY_KIND: ${{ fromJSON(inputs.iupipes).deployK8sDeploymentType }}
+      CLUSTER: ${{ fromJSON(inputs.advpipes).cluster }}
+      NAMESPACE: ${{ fromJSON(inputs.advpipes).namespace }}
+      PERCENTAGE: ${{ fromJSON(inputs.advpipes).percentage }}
+      DEPLOY_KIND: ${{ fromJSON(inputs.advpipes).deployK8sDeploymentType }}
     steps:
       - name: Deploy simulado
         run: |

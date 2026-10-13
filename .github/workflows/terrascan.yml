@@ -4,7 +4,7 @@ name: terrascan
 on:
   workflow_call:
     inputs:
-      iupipes:
+      advpipes:
         type: string
         required: true
 
@@ -15,7 +15,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     env:
-      SCAN_DIR: ${{ fromJSON(inputs.iupipes).securityTerrascanWorkingDirectory || 'infra' }}
+      SCAN_DIR: ${{ fromJSON(inputs.advpipes).securityTerrascanWorkingDirectory || 'infra' }}
     steps:
       - uses: actions/checkout@v4
       - name: Terrascan simulado

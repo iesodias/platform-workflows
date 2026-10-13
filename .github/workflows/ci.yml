@@ -1,10 +1,10 @@
 name: ci
 
-# Build + testes, conforme project.language do .iupipes.yml (ts | java-maven | infra)
+# Build + testes, conforme project.language do .advpipes.yml (ts | java-maven | infra)
 on:
   workflow_call:
     inputs:
-      iupipes:
+      advpipes:
         type: string
         required: true
       ref:
@@ -18,9 +18,9 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     env:
-      LANGUAGE: ${{ fromJSON(inputs.iupipes).projectLanguage }}
-      BUILD_DIR: ${{ fromJSON(inputs.iupipes).buildWorkingDirectory }}
-      TEST_DIR: ${{ fromJSON(inputs.iupipes).testWorkingDirectory || fromJSON(inputs.iupipes).buildWorkingDirectory }}
+      LANGUAGE: ${{ fromJSON(inputs.advpipes).projectLanguage }}
+      BUILD_DIR: ${{ fromJSON(inputs.advpipes).buildWorkingDirectory }}
+      TEST_DIR: ${{ fromJSON(inputs.advpipes).testWorkingDirectory || fromJSON(inputs.advpipes).buildWorkingDirectory }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,15 +29,15 @@ jobs:
       - if: env.LANGUAGE == 'ts'
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ fromJSON(inputs.iupipes).buildNodeVersion || '20' }}
+          node-version: ${{ fromJSON(inputs.advpipes).buildNodeVersion || '20' }}
           cache: npm
-          cache-dependency-path: ${{ fromJSON(inputs.iupipes).buildWorkingDirectory }}/package-lock.json
+          cache-dependency-path: ${{ fromJSON(inputs.advpipes).buildWorkingDirectory }}/package-lock.json
 
       - if: env.LANGUAGE == 'java-maven'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: ${{ fromJSON(inputs.iupipes).buildJavaVersion || '21' }}
+          java-version: ${{ fromJSON(inputs.advpipes).buildJavaVersion || '21' }}
           cache: maven
 
       - name: Build

@@ -1,6 +1,6 @@
 name: source_control
 
-# Lê o .iupipes.yml da raiz do repo, valida, achata para camelCase e resolve os valores do ambiente.
+# Lê o .advpipes.yml da raiz do repo, valida, achata para camelCase e resolve os valores do ambiente.
 # Também aplica "guards" do evento (PR mergeado, branch de origem, etc.) e expõe outputs.run.
 on:
   workflow_call:
@@ -20,8 +20,8 @@ on:
     outputs:
       run:
         value: ${{ jobs.parse.outputs.run }}
-      iupipes:
-        value: ${{ jobs.parse.outputs.iupipes }}
+      advpipes:
+        value: ${{ jobs.parse.outputs.advpipes }}
       language:
         value: ${{ jobs.parse.outputs.language }}
       environment:
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.guard.outputs.run }}
-      iupipes: ${{ steps.parse.outputs.iupipes }}
+      advpipes: ${{ steps.parse.outputs.advpipes }}
       language: ${{ steps.parse.outputs.language }}
       environment: ${{ steps.parse.outputs.environment }}
     env:
@@ -75,12 +75,17 @@ jobs:
 
       - id: parse
         if: steps.guard.outputs.run == 'true'
-        name: Parse .iupipes.yml
+        name: Parse .advpipes.yml
         run: |
           set -euo pipefail
-          [ -f .iupipes.yml ] || { echo "::error::.iupipes.yml não encontrado na raiz"; exit 1; }
+          CFG=.advpipes.yml
+          if [ ! -f "$CFG" ] && [ -f .iupipes.yml ]; then
+            echo "::warning::.iupipes.yml é o nome legado; renomeie para .advpipes.yml"
+            CFG=.iupipes.yml
+          fi
+          [ -f "$CFG" ] || { echo "::error::.advpipes.yml não encontrado na raiz"; exit 1; }
           for k in .project.language .build .deploy; do
-            [ "$(yq "$k // \"\"" .iupipes.yml)" != "" ] || { echo "::error::.iupipes.yml sem a chave obrigatória $k"; exit 1; }
+            [ "$(yq "$k // \"\"" "$CFG")" != "" ] || { echo "::error::$CFG sem a chave obrigatória $k"; exit 1; }
           done
           cat > "$RUNNER_TEMP/flatten.jq" <<'JQ'
           def cap: (.[0:1] | ascii_upcase) + .[1:];
@@ -96,11 +101,11 @@ jobs:
                      percentage: $flat["deployK8s\($E)Percentage"],
                      account:    $flat["deployAws\($E)Account"]}
           JQ
-          JSON=$(yq -o=json '.' .iupipes.yml | jq -c --arg env "${TARGET_ENV:-}" -f "$RUNNER_TEMP/flatten.jq")
+          JSON=$(yq -o=json '.' "$CFG" | jq -c --arg env "${TARGET_ENV:-}" -f "$RUNNER_TEMP/flatten.jq")
           {
-            echo "iupipes=$JSON"
+            echo "advpipes=$JSON"
             echo "language=$(jq -r .projectLanguage <<<"$JSON")"
             echo "environment=${TARGET_ENV:-}"
           } >> "$GITHUB_OUTPUT"
-          echo "📄 .iupipes (achatado, env=${TARGET_ENV:-n/a}):"
+          echo "📄 .advpipes (achatado, env=${TARGET_ENV:-n/a}):"
           jq . <<<"$JSON"

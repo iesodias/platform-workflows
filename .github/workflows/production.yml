@@ -62,7 +62,7 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       mode: promote
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: prod
       version: ${{ needs.gate.outputs.version }}
 
@@ -89,7 +89,7 @@ jobs:
     needs: [gate, source-control, create-change]
     uses: ./.github/workflows/deploy.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: prod
       version: ${{ needs.gate.outputs.version }}
       change-id: ${{ needs.create-change.outputs.change-id }}

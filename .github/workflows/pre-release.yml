@@ -36,7 +36,7 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       mode: promote
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: hom
       version: ${{ needs.version.outputs.version }}
 
@@ -52,7 +52,7 @@ jobs:
     needs: [source-control, version, promote-docker]
     uses: ./.github/workflows/deploy.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: hom
       version: ${{ needs.version.outputs.version }}
 

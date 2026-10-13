@@ -21,7 +21,7 @@ jobs:
     if: needs.source-control.outputs.run == 'true'
     uses: ./.github/workflows/ci.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       ref: ${{ github.event.pull_request.merge_commit_sha }}
 
   upload-package:
@@ -29,7 +29,7 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       mode: upload
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: dev
       ref: ${{ github.event.pull_request.merge_commit_sha }}
 
@@ -45,7 +45,7 @@ jobs:
     needs: [source-control, upload-package, publish-docker]
     uses: ./.github/workflows/deploy.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: dev
       version: ${{ needs.upload-package.outputs.artifact-version }}
 

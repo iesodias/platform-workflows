@@ -18,13 +18,13 @@ jobs:
     needs: source-control
     uses: ./.github/workflows/ci.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
 
   terrascan:
     needs: [source-control, ci]
     uses: ./.github/workflows/terrascan.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
 
   helm-lint:
     needs: [source-control, ci]
@@ -36,7 +36,7 @@ jobs:
     needs: [source-control, ci]
     uses: ./.github/workflows/security.yml
     with:
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       non-blocking: true
 
   upload-package:
@@ -44,7 +44,7 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       mode: upload
-      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      advpipes: ${{ needs.source-control.outputs.advpipes }}
       environment: hotfix
 
   publish-docker:
