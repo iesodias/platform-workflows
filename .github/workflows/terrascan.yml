@@ -1,0 +1,29 @@
+name: terrascan
+
+# Scan de IaC simulado sobre security.terrascan.working-directory
+on:
+  workflow_call:
+    inputs:
+      iupipes:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      SCAN_DIR: ${{ fromJSON(inputs.iupipes).securityTerrascanWorkingDirectory || 'infra' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Terrascan simulado
+        run: |
+          echo "🛡️ [SIMULADO] Terrascan em $SCAN_DIR"
+          if [ -d "$SCAN_DIR" ]; then
+            echo "Arquivos .tf analisados: $(find "$SCAN_DIR" -name '*.tf' | wc -l | tr -d ' ')"
+          else
+            echo "::notice::Diretório $SCAN_DIR inexistente; nada a escanear"
+          fi
+          echo "0 violações"

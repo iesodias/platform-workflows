@@ -1,0 +1,35 @@
+name: release
+
+# PR mergeado em main vindo de release/* ou hotfix*: tag final + GitHub Release (mesmo pacote)
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  info:
+    if: >-
+      github.event.pull_request.merged == true &&
+      (startsWith(github.event.pull_request.head.ref, 'release/') || startsWith(github.event.pull_request.head.ref, 'hotfix'))
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - id: v
+        run: |
+          VERSION=$(grep -oE 'artifact-version:[0-9A-Za-z._-]+' <<<"$PR_BODY" | head -1 | cut -d: -f2 || true)
+          [ -n "$VERSION" ] || VERSION="${HEAD_REF#release/}"
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão não identificada"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  release-promote:
+    needs: info
+    uses: ./.github/workflows/auto_tag.yml
+    with:
+      mode: release-promote
+      version: ${{ needs.info.outputs.version }}
+      sha: ${{ github.event.pull_request.merge_commit_sha }}

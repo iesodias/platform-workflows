@@ -1,0 +1,115 @@
+name: production
+
+# PR com base em main EDITADO: o deploy em PROD só ocorre com o checkbox marcado no corpo do PR:
+#   - [x] Aprovar deploy em PROD
+# Isso separa a APROVAÇÃO do deploy (edição do PR, feita por um humano) do MERGE em si
+# (blue/green / canary): o merge só acontece depois que o deploy canary foi promovido.
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+      version: ${{ steps.check.outputs.version }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      BODY_CHANGED: ${{ github.event.changes.body != null }}
+    steps:
+      - id: check
+        run: |
+          go=false
+          VERSION=$(grep -oE 'artifact-version:[0-9A-Za-z._-]+' <<<"$PR_BODY" | head -1 | cut -d: -f2 || true)
+          [ -n "$VERSION" ] || VERSION="${HEAD_REF#release/}"
+          if [ "$BODY_CHANGED" != "true" ]; then
+            echo "Edição não alterou o corpo do PR; ignorando"
+          elif ! grep -qiE '^- \[x\] Aprovar deploy em PROD' <<<"$PR_BODY"; then
+            echo "Checkbox 'Aprovar deploy em PROD' não marcado; sem deploy"
+          elif ! [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]]; then
+            echo "::error::Versão não identificada (marcador artifact-version ausente?)"; exit 1
+          elif gh pr view "$PR_NUMBER" --json comments -q '.comments[].body' | grep -qF "deployed-prod:$HEAD_SHA"; then
+            echo "Deploy de $HEAD_SHA já executado; ignorando (idempotente)"
+          else
+            go=true
+          fi
+          {
+            echo "go=$go"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+  source-control:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    uses: ./.github/workflows/source_control.yml
+    with:
+      environment: prod
+      guard: prod-head
+      ref: ${{ github.event.pull_request.head.sha }}
+
+  promote-package:
+    needs: [gate, source-control]
+    if: needs.source-control.outputs.run == 'true'
+    uses: ./.github/workflows/publish.yml
+    with:
+      mode: promote
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: prod
+      version: ${{ needs.gate.outputs.version }}
+
+  promote-docker:
+    needs: [gate, promote-package]
+    uses: ./.github/workflows/container.yml
+    with:
+      mode: promote
+      version: ${{ needs.gate.outputs.version }}
+      environment: prod
+
+  create-change:
+    needs: promote-docker
+    runs-on: ubuntu-latest
+    outputs:
+      change-id: ${{ steps.c.outputs.id }}
+    steps:
+      - id: c
+        run: |
+          echo "id=GMUD-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          echo "📝 [SIMULADO] GMUD GMUD-${{ github.run_id }} aberta no ServiceNow"
+
+  deploy-prod:
+    needs: [gate, source-control, create-change]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: prod
+      version: ${{ needs.gate.outputs.version }}
+      change-id: ${{ needs.create-change.outputs.change-id }}
+
+  close-change:
+    needs: [create-change, deploy-prod]
+    if: ${{ always() && needs.create-change.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      DEPLOY_RESULT: ${{ needs.deploy-prod.result }}
+      CHANGE_ID: ${{ needs.create-change.outputs.change-id }}
+    steps:
+      - run: |
+          if [ "$DEPLOY_RESULT" = "success" ]; then
+            echo "📝 [SIMULADO] GMUD $CHANGE_ID fechada com sucesso"
+            gh pr comment "$PR_NUMBER" --body "🚀 Deploy canary em PROD concluído (simulado) para \`${HEAD_SHA::7}\` — GMUD $CHANGE_ID. Promova ou rejeite via Issue (Promote/Reject). <!-- deployed-prod:$HEAD_SHA -->"
+          else
+            echo "📝 [SIMULADO] GMUD $CHANGE_ID fechada com falha"
+          fi

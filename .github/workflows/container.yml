@@ -1,0 +1,43 @@
+name: container
+
+# docker build/push (upload) ou retag da mesma imagem (promote) — simulado
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "build-push | promote"
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      environment:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ inputs.mode }}
+      VERSION: ${{ inputs.version }}
+      TARGET_ENV: ${{ inputs.environment }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Imagem simulada
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida"; exit 1; }
+          IMAGE="registry.lab.local/${REPO,,}:$VERSION"
+          # digest simulado = sha256 do pacote registrado no Release (mesma imagem em todos os ambientes)
+          DIGEST="sha256:$(gh api "repos/$GH_REPO/releases/tags/v$VERSION-rc" -q .body | grep -o '[0-9a-f]\{64\}' | head -1 || true)"
+          case "$MODE" in
+            build-push) echo "🐳 [SIMULADO] docker build -t $IMAGE . && docker push $IMAGE  ($DIGEST)" ;;
+            promote)    echo "🐳 [SIMULADO] retag $IMAGE ($DIGEST) → ${TARGET_ENV^^} (sem rebuild)" ;;
+            *) echo "::error::mode inválido"; exit 1 ;;
+          esac

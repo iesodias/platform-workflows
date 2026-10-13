@@ -1,0 +1,62 @@
+name: pre-release_prepare
+
+# push em pre-release: build once da preparação → abre PRs para develop e para release/<versão>
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  source-control:
+    uses: ./.github/workflows/source_control.yml
+    with:
+      environment: hom
+      guard: differs-from-main
+
+  ci:
+    needs: source-control
+    if: needs.source-control.outputs.run == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+
+  upload-package:
+    needs: [source-control, ci]
+    uses: ./.github/workflows/publish.yml
+    with:
+      mode: upload
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: hom
+
+  publish-docker:
+    needs: upload-package
+    uses: ./.github/workflows/container.yml
+    with:
+      mode: build-push
+      version: ${{ needs.upload-package.outputs.artifact-version }}
+      environment: hom
+
+  open-pr-to-develop:
+    needs: [source-control, upload-package, publish-docker]
+    if: ${{ !failure() && !cancelled() && needs.source-control.outputs.run == 'true' }}
+    uses: ./.github/workflows/create_pr.yml
+    secrets: inherit
+    with:
+      base: develop
+      head: pre-release
+      title: "pre-release -> develop (${{ needs.upload-package.outputs.artifact-version }})"
+      body: "Alinha o develop com a preparação da release ${{ needs.upload-package.outputs.artifact-version }}. Aguardando revisão e aprovação humana."
+
+  open-pr-to-release-branch:
+    needs: [source-control, upload-package, publish-docker]
+    if: ${{ !failure() && !cancelled() && needs.source-control.outputs.run == 'true' }}
+    uses: ./.github/workflows/create_pr.yml
+    secrets: inherit
+    with:
+      base: release/${{ needs.upload-package.outputs.artifact-version }}
+      create-base-from: main
+      head: pre-release
+      title: "Release ${{ needs.upload-package.outputs.artifact-version }} (pre-release)"
+      body: "Preparação da release ${{ needs.upload-package.outputs.artifact-version }}. Mergear promove para HOM. Aguardando revisão e aprovação humana."

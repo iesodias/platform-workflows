@@ -1,0 +1,41 @@
+name: security
+
+# SAST simulado (Fortify). Pode ser não bloqueante (hotfix).
+on:
+  workflow_call:
+    inputs:
+      iupipes:
+        type: string
+        required: true
+      non-blocking:
+        description: "Se true, falhas do scan não derrubam a esteira"
+        type: boolean
+        default: false
+      simulate-findings:
+        description: "Simula achados críticos (para demonstrar o modo não bloqueante)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    env:
+      ENABLED: ${{ fromJSON(inputs.iupipes).securityFortifyEnabled }}
+      SIGLA: ${{ fromJSON(inputs.iupipes).securityFortifySiglaApp }}
+      FINDINGS: ${{ inputs.simulate-findings }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SAST simulado
+        continue-on-error: ${{ inputs.non-blocking }}
+        run: |
+          if [ "$ENABLED" != "true" ]; then
+            echo "SAST desabilitado no .iupipes.yml"; exit 0
+          fi
+          echo "🔒 [SIMULADO] Fortify SAST — sigla $SIGLA"
+          if [ "$FINDINGS" = "true" ]; then
+            echo "::warning::2 achados críticos simulados"; exit 1
+          fi
+          echo "0 achados críticos"

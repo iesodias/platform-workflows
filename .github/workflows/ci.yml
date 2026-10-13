@@ -1,0 +1,65 @@
+name: ci
+
+# Build + testes, conforme project.language do .iupipes.yml (ts | java-maven | infra)
+on:
+  workflow_call:
+    inputs:
+      iupipes:
+        type: string
+        required: true
+      ref:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      LANGUAGE: ${{ fromJSON(inputs.iupipes).projectLanguage }}
+      BUILD_DIR: ${{ fromJSON(inputs.iupipes).buildWorkingDirectory }}
+      TEST_DIR: ${{ fromJSON(inputs.iupipes).testWorkingDirectory || fromJSON(inputs.iupipes).buildWorkingDirectory }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - if: env.LANGUAGE == 'ts'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ fromJSON(inputs.iupipes).buildNodeVersion || '20' }}
+          cache: npm
+          cache-dependency-path: ${{ fromJSON(inputs.iupipes).buildWorkingDirectory }}/package-lock.json
+
+      - if: env.LANGUAGE == 'java-maven'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ fromJSON(inputs.iupipes).buildJavaVersion || '21' }}
+          cache: maven
+
+      - name: Build
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          case "$LANGUAGE" in
+            ts)         npm ci && npm run build --if-present ;;
+            java-maven) mvn -B -ntp -DskipTests package ;;
+            infra)
+              if command -v terraform >/dev/null; then
+                terraform fmt -check -recursive && terraform init -input=false -backend=false && terraform validate
+              else
+                echo "[SIMULADO] terraform não disponível no runner; build de infra simulado"
+              fi ;;
+            *) echo "::error::project.language desconhecido: $LANGUAGE"; exit 1 ;;
+          esac
+
+      - name: Test
+        working-directory: ${{ env.TEST_DIR }}
+        run: |
+          case "$LANGUAGE" in
+            ts)         npm test --if-present ;;
+            java-maven) mvn -B -ntp test ;;
+            infra)      echo "[SIMULADO] testes de infra" ;;
+          esac

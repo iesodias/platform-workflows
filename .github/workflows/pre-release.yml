@@ -1,0 +1,121 @@
+name: pre-release
+
+# PR mergeado em release/* (HOM): promove o MESMO pacote → deploy HOM → TAAC → tag → PR para main
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  source-control:
+    uses: ./.github/workflows/source_control.yml
+    with:
+      environment: hom
+      guard: merged
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  version:
+    needs: source-control
+    if: needs.source-control.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+    steps:
+      - id: v
+        run: |
+          VERSION="${BASE_REF#release/}"
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão derivada inválida: $VERSION"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  promote-package:
+    needs: [source-control, version]
+    uses: ./.github/workflows/publish.yml
+    with:
+      mode: promote
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: hom
+      version: ${{ needs.version.outputs.version }}
+
+  promote-docker:
+    needs: [version, promote-package]
+    uses: ./.github/workflows/container.yml
+    with:
+      mode: promote
+      version: ${{ needs.version.outputs.version }}
+      environment: hom
+
+  deploy-hom:
+    needs: [source-control, version, promote-docker]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: hom
+      version: ${{ needs.version.outputs.version }}
+
+  taac-hom:
+    needs: deploy-hom
+    runs-on: ubuntu-latest
+    outputs:
+      taac-id: ${{ steps.t.outputs.id }}
+    steps:
+      - id: t
+        run: |
+          echo "id=TAAC-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          echo "🧪 [SIMULADO] TAAC HOM — testes automatizados de aceitação: 28 passaram, 0 falharam"
+
+  pre-release-tag:
+    needs: [version, taac-hom]
+    uses: ./.github/workflows/auto_tag.yml
+    with:
+      mode: pre-release
+      version: ${{ needs.version.outputs.version }}
+
+  change-inspector:
+    needs: [version, taac-hom]
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.b.outputs.body }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+      TAAC_ID: ${{ needs.taac-hom.outputs.taac-id }}
+    steps:
+      - id: b
+        name: Risk summary (simulado)
+        run: |
+          STATS=$(gh api "repos/$GH_REPO/compare/main...release/$VERSION" -q '[.files|length, ([.files[].additions]|add // 0), ([.files[].deletions]|add // 0)]|@tsv' 2>/dev/null || echo "0	0	0")
+          read -r FILES ADD DEL <<<"$STATS"
+          RISK=BAIXO; [ "$((ADD+DEL))" -gt 200 ] && RISK=MÉDIO
+          echo "🔎 [SIMULADO] change-inspector: $FILES arquivos, +$ADD/-$DEL → risco $RISK"
+          {
+            echo "body<<EOF_BODY"
+            echo "Release $VERSION validada em HOM."
+            echo
+            echo "**Risk summary (change-inspector):** $FILES arquivos alterados, +$ADD/-$DEL linhas → risco **$RISK**"
+            echo "**TAAC:** $TAAC_ID"
+            echo "**Milestone:** $VERSION"
+            echo
+            echo "Para aprovar o deploy em PROD, **edite este PR** marcando o checkbox:"
+            echo
+            echo "- [ ] Aprovar deploy em PROD"
+            echo
+            echo "<!-- artifact-version:$VERSION -->"
+            echo "EOF_BODY"
+          } >> "$GITHUB_OUTPUT"
+
+  open-pr-to-main:
+    needs: [source-control, version, pre-release-tag, change-inspector]
+    if: ${{ !failure() && !cancelled() && needs.source-control.outputs.run == 'true' }}
+    uses: ./.github/workflows/create_pr.yml
+    secrets: inherit
+    with:
+      base: main
+      head: release/${{ needs.version.outputs.version }}
+      title: "Release ${{ needs.version.outputs.version }} -> main"
+      body: ${{ needs.change-inspector.outputs.body }}
+      milestone: ${{ needs.version.outputs.version }}

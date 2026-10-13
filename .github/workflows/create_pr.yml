@@ -1,0 +1,73 @@
+name: create_pr
+
+# Abre PR (não-draft, pronto para análise humana). Nunca faz merge.
+# Opcionalmente cria a branch base (ex.: release/<ver>) a partir de outra e um milestone.
+on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
+      head:
+        type: string
+        required: true
+      title:
+        type: string
+        required: true
+      body:
+        type: string
+        default: ""
+      create-base-from:
+        description: "Se a branch base não existir, cria a partir desta branch (ex.: main)"
+        type: string
+        default: ""
+      milestone:
+        type: string
+        default: ""
+    outputs:
+      pr-url:
+        value: ${{ jobs.pr.outputs.url }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  pr:
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.open.outputs.url }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      # PAT (CI_PAT) faz o PR disparar outros workflows; sem ele, GITHUB_TOKEN
+      GH_TOKEN: ${{ secrets.CI_PAT || github.token }}
+      BASE: ${{ inputs.base }}
+      HEAD: ${{ inputs.head }}
+      TITLE: ${{ inputs.title }}
+      BODY: ${{ inputs.body }}
+      FROM: ${{ inputs.create-base-from }}
+      MILESTONE: ${{ inputs.milestone }}
+    steps:
+      - id: open
+        run: |
+          set -euo pipefail
+          if [ -n "$FROM" ] && ! gh api "repos/$GH_REPO/git/ref/heads/$BASE" >/dev/null 2>&1; then
+            SRC=$(gh api "repos/$GH_REPO/git/ref/heads/$FROM" -q .object.sha)
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$BASE" -f sha="$SRC" >/dev/null
+            echo "🌿 branch $BASE criada a partir de $FROM"
+          fi
+          EXISTING=$(gh pr list --head "$HEAD" --base "$BASE" --state open --json url -q '.[0].url')
+          if [ -n "$EXISTING" ]; then
+            echo "PR já aberto: $EXISTING"; echo "url=$EXISTING" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          ARGS=(--base "$BASE" --head "$HEAD" --title "$TITLE" --body "$BODY")
+          if [ -n "$MILESTONE" ]; then
+            gh api "repos/$GH_REPO/milestones?state=all&per_page=100" -q '.[].title' | grep -qxF "$MILESTONE" \
+              || gh api -X POST "repos/$GH_REPO/milestones" -f title="$MILESTONE" >/dev/null
+            ARGS+=(--milestone "$MILESTONE")
+          fi
+          if URL=$(gh pr create "${ARGS[@]}"); then
+            echo "✅ PR aberto (aguardando análise humana): $URL"; echo "url=$URL" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::PR $HEAD -> $BASE não aberto (sem diferenças entre as branches?)"
+          fi

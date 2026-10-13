@@ -1,0 +1,106 @@
+name: source_control
+
+# Lê o .iupipes.yml da raiz do repo, valida, achata para camelCase e resolve os valores do ambiente.
+# Também aplica "guards" do evento (PR mergeado, branch de origem, etc.) e expõe outputs.run.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "dev | hom | prod | hotfix"
+        type: string
+        default: ""
+      guard:
+        description: "none | merged | merged-not-prerelease | prod-head | differs-from-main"
+        type: string
+        default: none
+      ref:
+        description: "Ref para checkout (vazio = padrão do evento)"
+        type: string
+        default: ""
+    outputs:
+      run:
+        value: ${{ jobs.parse.outputs.run }}
+      iupipes:
+        value: ${{ jobs.parse.outputs.iupipes }}
+      language:
+        value: ${{ jobs.parse.outputs.language }}
+      environment:
+        value: ${{ jobs.parse.outputs.environment }}
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.guard.outputs.run }}
+      iupipes: ${{ steps.parse.outputs.iupipes }}
+      language: ${{ steps.parse.outputs.language }}
+      environment: ${{ steps.parse.outputs.environment }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      GUARD: ${{ inputs.guard }}
+      TARGET_ENV: ${{ inputs.environment }}
+      EVENT_NAME: ${{ github.event_name }}
+      PR_MERGED: ${{ github.event.pull_request.merged }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      SHA: ${{ github.sha }}
+    steps:
+      - id: guard
+        name: Guards do evento
+        run: |
+          run=true
+          case "$GUARD" in
+            none) ;;
+            merged)
+              [ "$PR_MERGED" = "true" ] || run=false ;;
+            merged-not-prerelease)
+              { [ "$PR_MERGED" = "true" ] && [ "$HEAD_REF" != "pre-release" ]; } || run=false ;;
+            prod-head)
+              case "$HEAD_REF" in release/*|hotfix*) ;; *) run=false ;; esac ;;
+            differs-from-main)
+              MAIN_SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" -q .object.sha)
+              [ "$MAIN_SHA" != "$SHA" ] || run=false ;;
+            *) echo "::error::guard desconhecido: $GUARD"; exit 1 ;;
+          esac
+          echo "guard=$GUARD run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - id: parse
+        if: steps.guard.outputs.run == 'true'
+        name: Parse .iupipes.yml
+        run: |
+          set -euo pipefail
+          [ -f .iupipes.yml ] || { echo "::error::.iupipes.yml não encontrado na raiz"; exit 1; }
+          for k in .project.language .build .deploy; do
+            [ "$(yq "$k // \"\"" .iupipes.yml)" != "" ] || { echo "::error::.iupipes.yml sem a chave obrigatória $k"; exit 1; }
+          done
+          cat > "$RUNNER_TEMP/flatten.jq" <<'JQ'
+          def cap: (.[0:1] | ascii_upcase) + .[1:];
+          def kc: split("-") | .[0] + (.[1:] | map(cap) | join(""));
+          def camel: map(tostring | kc) | .[0] + (.[1:] | map(cap) | join(""));
+          . as $root
+          | ([paths(scalars) as $p | {key: ($p | camel), value: ($root | getpath($p))}] | from_entries) as $flat
+          | ($env | if . == "hotfix" then "prod" else . end) as $e
+          | ($e | cap) as $E
+          | $flat + {environment: $env,
+                     cluster:    $flat["deployK8s\($E)Cluster"],
+                     namespace:  $flat["deployK8s\($E)Namespace"],
+                     percentage: $flat["deployK8s\($E)Percentage"],
+                     account:    $flat["deployAws\($E)Account"]}
+          JQ
+          JSON=$(yq -o=json '.' .iupipes.yml | jq -c --arg env "${TARGET_ENV:-}" -f "$RUNNER_TEMP/flatten.jq")
+          {
+            echo "iupipes=$JSON"
+            echo "language=$(jq -r .projectLanguage <<<"$JSON")"
+            echo "environment=${TARGET_ENV:-}"
+          } >> "$GITHUB_OUTPUT"
+          echo "📄 .iupipes (achatado, env=${TARGET_ENV:-n/a}):"
+          jq . <<<"$JSON"

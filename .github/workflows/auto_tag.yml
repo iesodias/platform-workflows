@@ -1,0 +1,62 @@
+name: auto_tag
+
+# pre-release: registra a validação em HOM no Release v<ver>-rc
+# release-promote: cria a tag final v<ver> + GitHub Release com o MESMO pacote (sem rebuild)
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "pre-release | release-promote"
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      sha:
+        description: "Commit alvo da tag final (release-promote)"
+        type: string
+        default: ""
+      note:
+        description: "Nota registrada no pre-release"
+        type: string
+        default: "Validado em HOM"
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ inputs.mode }}
+      VERSION: ${{ inputs.version }}
+      TARGET_SHA: ${{ inputs.sha || github.sha }}
+      NOTE: ${{ inputs.note }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida"; exit 1; }
+          RC="v$VERSION-rc"
+          case "$MODE" in
+            pre-release)
+              gh release view "$RC" >/dev/null 2>&1 || { echo "::error::Release $RC não existe (pacote não foi publicado)"; exit 1; }
+              NOTES=$(gh release view "$RC" --json body -q .body)
+              gh release edit "$RC" --notes "$NOTES
+          ✔ $NOTE: $RUN_URL"
+              echo "🏷️  pre-release $RC atualizado: $NOTE"
+              ;;
+            release-promote)
+              if gh release view "v$VERSION" >/dev/null 2>&1; then
+                echo "::notice::Release final v$VERSION já existe"; exit 0
+              fi
+              mkdir -p dl && gh release download "$RC" -D dl -p pkg.tgz -p pkg.tgz.sha256
+              (cd dl && sha256sum -c pkg.tgz.sha256)
+              gh release create "v$VERSION" dl/pkg.tgz dl/pkg.tgz.sha256 --target "$TARGET_SHA" --latest \
+                --title "$VERSION" --notes "Release final $VERSION — mesmo pacote promovido de $RC (sha256 verificado). Aprovado em PROD: $RUN_URL"
+              echo "🏁 tag final v$VERSION criada e GitHub Release publicado"
+              ;;
+            *) echo "::error::mode inválido: $MODE"; exit 1 ;;
+          esac

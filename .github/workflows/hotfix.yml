@@ -1,0 +1,108 @@
+name: hotfix
+
+# push em hotfix/**: pipeline de emergência (SAST não bloqueante) → PRs para develop e main
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  source-control:
+    uses: ./.github/workflows/source_control.yml
+    with:
+      environment: hotfix
+
+  ci:
+    needs: source-control
+    uses: ./.github/workflows/ci.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+
+  terrascan:
+    needs: [source-control, ci]
+    uses: ./.github/workflows/terrascan.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+
+  helm-lint:
+    needs: [source-control, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "⎈ [SIMULADO] helm lint charts/"
+
+  sast-non-blocking:
+    needs: [source-control, ci]
+    uses: ./.github/workflows/security.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      non-blocking: true
+
+  upload-package:
+    needs: [source-control, terrascan, helm-lint, sast-non-blocking]
+    uses: ./.github/workflows/publish.yml
+    with:
+      mode: upload
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: hotfix
+
+  publish-docker:
+    needs: upload-package
+    uses: ./.github/workflows/container.yml
+    with:
+      mode: build-push
+      version: ${{ needs.upload-package.outputs.artifact-version }}
+      environment: hotfix
+
+  pre-release-tag:
+    needs: [upload-package, publish-docker]
+    uses: ./.github/workflows/auto_tag.yml
+    with:
+      mode: pre-release
+      version: ${{ needs.upload-package.outputs.artifact-version }}
+      note: "Hotfix publicado (pacote pronto para promoção direta em PROD)"
+
+  open-pr-to-develop:
+    needs: [upload-package, pre-release-tag]
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/create_pr.yml
+    secrets: inherit
+    with:
+      base: develop
+      head: ${{ github.ref_name }}
+      title: "Hotfix ${{ github.ref_name }} -> develop"
+      body: "Traz o hotfix para o develop. Aguardando revisão e aprovação humana."
+
+  compose-main-body:
+    needs: upload-package
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.b.outputs.body }}
+    env:
+      VERSION: ${{ needs.upload-package.outputs.artifact-version }}
+    steps:
+      - id: b
+        run: |
+          {
+            echo "body<<EOF_BODY"
+            echo "Hotfix $VERSION (SAST não bloqueante)."
+            echo
+            echo "Para aprovar o deploy em PROD, **edite este PR** marcando o checkbox:"
+            echo
+            echo "- [ ] Aprovar deploy em PROD"
+            echo
+            echo "<!-- artifact-version:$VERSION -->"
+            echo "EOF_BODY"
+          } >> "$GITHUB_OUTPUT"
+
+  open-pr-to-main:
+    needs: [upload-package, pre-release-tag, compose-main-body]
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/create_pr.yml
+    secrets: inherit
+    with:
+      base: main
+      head: ${{ github.ref_name }}
+      title: "Hotfix ${{ github.ref_name }} -> main"
+      body: ${{ needs.compose-main-body.outputs.body }}

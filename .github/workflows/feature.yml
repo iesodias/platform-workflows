@@ -1,0 +1,57 @@
+name: feature
+
+# push em feature/**: valida nome → build/test → [terrascan ∥ helm-lint] → abre PR para develop
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Valida convenção feature/HIS-XXXX-NNNNNNN-descricao
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$BRANCH" =~ ^feature/HIS-[0-9]{4}-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "::error::Branch '$BRANCH' fora do padrão feature/HIS-XXXX-NNNNNNN-descricao (ex: feature/HIS-2025-2147154-cobranca-pre-atraso)"
+            exit 1
+          fi
+
+  source-control:
+    needs: validate-name
+    uses: ./.github/workflows/source_control.yml
+    with:
+      environment: dev
+
+  ci:
+    needs: source-control
+    uses: ./.github/workflows/ci.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+
+  terrascan:
+    needs: [source-control, ci]
+    uses: ./.github/workflows/terrascan.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+
+  helm-lint:
+    needs: [source-control, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "⎈ [SIMULADO] helm lint charts/ (tipo ${{ fromJSON(needs.source-control.outputs.iupipes).deployK8sDeploymentType }})"
+
+  open-pr-to-develop:
+    needs: [source-control, ci, terrascan, helm-lint]
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/create_pr.yml
+    secrets: inherit
+    with:
+      base: develop
+      head: ${{ github.ref_name }}
+      title: ${{ github.ref_name }}
+      body: "PR aberto automaticamente pela esteira (build, testes, terrascan e helm-lint passaram). Aguardando revisão e aprovação humana."

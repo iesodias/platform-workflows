@@ -1,0 +1,72 @@
+name: deploy
+
+# Deploy simulado por ambiente, promote/reject de canary e rollback
+on:
+  workflow_call:
+    inputs:
+      iupipes:
+        type: string
+        required: true
+      environment:
+        description: "dev | hom | prod"
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      deploy-type:
+        description: "deploy | promote | reject"
+        type: string
+        default: deploy
+      rollback:
+        type: boolean
+        default: false
+      change-id:
+        description: "GMUD associada (prod)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      TARGET_ENV: ${{ inputs.environment }}
+      VERSION: ${{ inputs.version }}
+      DEPLOY_TYPE: ${{ inputs.deploy-type }}
+      ROLLBACK: ${{ inputs.rollback }}
+      CHANGE_ID: ${{ inputs.change-id }}
+      CLUSTER: ${{ fromJSON(inputs.iupipes).cluster }}
+      NAMESPACE: ${{ fromJSON(inputs.iupipes).namespace }}
+      PERCENTAGE: ${{ fromJSON(inputs.iupipes).percentage }}
+      DEPLOY_KIND: ${{ fromJSON(inputs.iupipes).deployK8sDeploymentType }}
+    steps:
+      - name: Deploy simulado
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida"; exit 1; }
+          echo "☸️  cluster=$CLUSTER namespace=$NAMESPACE tipo=$DEPLOY_KIND ambiente=${TARGET_ENV^^} versão=$VERSION ${CHANGE_ID:+GMUD=$CHANGE_ID}"
+          if [ "$ROLLBACK" = "true" ]; then
+            PREV=$(gh release list --limit 30 --json tagName -q '.[].tagName' | grep -E '^v[0-9]' | grep -v -- '-rc$' | grep -vx "v$VERSION" | head -1 || true)
+            echo "⏪ [SIMULADO] rollback em ${TARGET_ENV^^}: kubectl rollout undo deployment/app -n $NAMESPACE (última execução com sucesso: ${PREV:-n/a})"
+            exit 0
+          fi
+          case "$DEPLOY_TYPE" in
+            deploy)
+              if [ "$TARGET_ENV" = "prod" ]; then
+                echo "🐤 [SIMULADO] deploy canary ${PERCENTAGE}% da versão $VERSION — aguardando promote/reject via Issue"
+              else
+                echo "🚀 [SIMULADO] helm upgrade app --version $VERSION -n $NAMESPACE (${TARGET_ENV^^})"
+              fi ;;
+            promote) echo "✅ [SIMULADO] promote: 100% do tráfego para $VERSION em ${TARGET_ENV^^}" ;;
+            reject)  echo "🛑 [SIMULADO] reject: tráfego volta 100% para a versão anterior em ${TARGET_ENV^^}" ;;
+            *) echo "::error::deploy-type inválido: $DEPLOY_TYPE"; exit 1 ;;
+          esac

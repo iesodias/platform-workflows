@@ -1,0 +1,141 @@
+name: rollback
+
+# Issue aberta (label promote|rollback): lê o Issue Form (campos >>Campo<<) e executa promote / reject / rollback
+# Atenção: workflows com trigger `issues` só rodam a partir da branch default (main).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  form-to-json:
+    if: >-
+      (contains(github.event.issue.labels.*.name, 'promote') || contains(github.event.issue.labels.*.name, 'rollback')) &&
+      contains(fromJSON('["OWNER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.parse.outputs.action }}
+      environment: ${{ steps.parse.outputs.environment }}
+      version: ${{ steps.parse.outputs.version }}
+      gmud: ${{ steps.parse.outputs.gmud }}
+      branch: ${{ steps.parse.outputs.branch }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      # Corpo da issue é input não confiável: só via env, lido como "$BODY" no shell
+      BODY: ${{ github.event.issue.body }}
+      LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - id: parse
+        run: |
+          set -euo pipefail
+          gh issue comment "$ISSUE_NUMBER" --body "⏳ Acompanhe a execução: $RUN_URL"
+          fail() { gh issue comment "$ISSUE_NUMBER" --body "❌ $1"; echo "reported=true" >> "$GITHUB_OUTPUT"; exit 1; }
+          # Campos no formato ### >>Campo<< (delimitadores >> e <<)
+          field() { awk -v k=">>$1<<" '$0=="### "k{f=1;next} /^### /{f=0} f' <<<"$BODY" | sed '/^[[:space:]]*$/d' | head -c 200 | tr -d '\r' | head -1; }
+
+          ENVIRONMENT=$(field Environment)
+          VERSION=$(field Versao)
+          GMUD=$(field GMUD)
+          [ "$GMUD" = "_No response_" ] && GMUD=""
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || fail "Versao inválida."
+          [[ -z "$GMUD" || "$GMUD" =~ ^[A-Za-z0-9._-]{1,32}$ ]] || fail "GMUD inválida."
+
+          case ",$LABELS," in
+            *,rollback,*)
+              ACTION=rollback
+              case "$ENVIRONMENT" in hom|prod) ;; *) fail "Rollback só é permitido em hom ou prod." ;; esac ;;
+            *,promote,*)
+              ACTION=$(field Promote)
+              case "$ACTION" in promote|reject) ;; *) fail "Campo Promote deve ser promote ou reject." ;; esac
+              case "$ENVIRONMENT" in dev|hom|prod) ;; *) fail "Environment inválido." ;; esac ;;
+            *) fail "Issue sem label promote/rollback." ;;
+          esac
+
+          if [ "$ENVIRONMENT" = "dev" ]; then BRANCH=develop; else BRANCH="release/$VERSION"; fi
+          {
+            echo "action=$ACTION"
+            echo "environment=$ENVIRONMENT"
+            echo "version=$VERSION"
+            echo "gmud=$GMUD"
+            echo "branch=$BRANCH"
+          } >> "$GITHUB_OUTPUT"
+          jq -n --arg a "$ACTION" --arg e "$ENVIRONMENT" --arg v "$VERSION" --arg g "$GMUD" --arg b "$BRANCH" \
+            '{action:$a, environment:$e, versao:$v, gmud:$g, branch:$b}'
+
+  source-control:
+    needs: form-to-json
+    uses: ./.github/workflows/source_control.yml
+    with:
+      environment: ${{ needs.form-to-json.outputs.environment }}
+      ref: ${{ needs.form-to-json.outputs.branch }}
+
+  validate:
+    needs: [form-to-json, source-control]
+    runs-on: ubuntu-latest
+    env:
+      TARGET_ENV: ${{ needs.form-to-json.outputs.environment }}
+      GMUD: ${{ needs.form-to-json.outputs.gmud }}
+    steps:
+      - run: |
+          if [ "$TARGET_ENV" = "prod" ]; then
+            [ -n "$GMUD" ] || { echo "::error::GMUD obrigatória para PROD"; exit 1; }
+            echo "✅ [SIMULADO] GMUD $GMUD validada no ServiceNow"
+          else
+            echo "Ambiente $TARGET_ENV: validação de GMUD não exigida"
+          fi
+
+  promote-reject:
+    needs: [form-to-json, source-control, validate]
+    if: ${{ needs.form-to-json.outputs.action == 'promote' || needs.form-to-json.outputs.action == 'reject' }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: ${{ needs.form-to-json.outputs.environment }}
+      version: ${{ needs.form-to-json.outputs.version }}
+      deploy-type: ${{ needs.form-to-json.outputs.action }}
+      change-id: ${{ needs.form-to-json.outputs.gmud }}
+
+  rollback:
+    needs: [form-to-json, source-control, validate]
+    if: ${{ needs.form-to-json.outputs.action == 'rollback' }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      iupipes: ${{ needs.source-control.outputs.iupipes }}
+      environment: ${{ needs.form-to-json.outputs.environment }}
+      version: ${{ needs.form-to-json.outputs.version }}
+      rollback: true
+      change-id: ${{ needs.form-to-json.outputs.gmud }}
+
+  add-error-comment:
+    needs: [form-to-json, source-control, validate, promote-reject, rollback]
+    if: ${{ failure() && needs.form-to-json.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - run: |
+          gh issue comment "$ISSUE_NUMBER" --body "❌ A execução falhou. Detalhes: $RUN_URL"
+
+  auto-closing-issue:
+    needs: [form-to-json, promote-reject, rollback]
+    if: ${{ !failure() && !cancelled() && (needs.promote-reject.result == 'success' || needs.rollback.result == 'success') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ACTION: ${{ needs.form-to-json.outputs.action }}
+      TARGET_ENV: ${{ needs.form-to-json.outputs.environment }}
+      VERSION: ${{ needs.form-to-json.outputs.version }}
+    steps:
+      - run: |
+          gh issue comment "$ISSUE_NUMBER" --body "✅ Sucesso: **$ACTION** executado em \`$TARGET_ENV\` para a versão \`$VERSION\` (simulado)."
+          gh issue close "$ISSUE_NUMBER"
