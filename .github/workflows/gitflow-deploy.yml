@@ -11,9 +11,14 @@ on:
         description: "dev | hom"
         type: string
         required: true
+      open-next-pr:
+        description: "Após o deploy, abre PR develop -> pre-release (usar só no DEV)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   build:
@@ -42,3 +47,23 @@ jobs:
           echo "   versão : $VERSION"
           echo "   commit : $SHA"
           echo "   origem : $PR_TITLE"
+
+  next-pr:
+    needs: deploy
+    if: github.event.pull_request.merged == true && inputs.open-next-pr
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      # PAT para o PR disparar outros workflows (GITHUB_TOKEN não encadeia)
+      GH_TOKEN: ${{ secrets.CI_PAT || github.token }}
+    steps:
+      - name: Abre PR develop -> pre-release
+        run: |
+          if [ -n "$(gh pr list --head develop --base pre-release --state open --json number -q '.[0].number')" ]; then
+            echo "PR develop -> pre-release já existe"
+            exit 0
+          fi
+          gh pr create --base pre-release --head develop \
+            --title "develop -> pre-release" \
+            --body "Preparação da release: mergear aciona o workflow 2.5, que cria release/<versão>." \
+            || echo "::notice::Sem diferenças entre develop e pre-release (ou PR não pôde ser criado)"
