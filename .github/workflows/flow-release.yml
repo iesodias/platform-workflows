@@ -1,4 +1,4 @@
-name: release
+name: flow-release
 
 # PR mergeado em main vindo de release/* ou hotfix*: tag final + GitHub Release (mesmo pacote)
 # Só libera a tag se o deploy em PROD daquele commit foi executado (marcador deployed-prod:<sha> no PR).
@@ -45,16 +45,16 @@ jobs:
           echo "::error::PR #$PR_NUMBER mergeado em main sem deploy em PROD de ${HEAD_SHA::7}; tag final v$VERSION não criada"
           exit 1
 
-  release-promote:
+  final-tag:
     needs: info
-    uses: ./.github/workflows/auto_tag.yml
+    uses: ./.github/workflows/tag.yml
     with:
-      mode: release-promote
+      mode: final
       version: ${{ needs.info.outputs.version }}
       sha: ${{ github.event.pull_request.merge_commit_sha }}
 
   delete-release-branch:
-    needs: release-promote
+    needs: final-tag
     if: startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     env:

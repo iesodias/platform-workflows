@@ -1,0 +1,69 @@
+name: flow-dev
+
+# PR mergeado em develop (DEV): build once → deploy DEV → abre PR develop -> release/<versão>
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  config:
+    uses: ./.github/workflows/config.yml
+    with:
+      environment: dev
+      guard: merged
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  ci:
+    needs: config
+    if: needs.config.outputs.run == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      advpipes: ${{ needs.config.outputs.advpipes }}
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  build-package:
+    needs: [config, ci]
+    uses: ./.github/workflows/package.yml
+    with:
+      mode: build
+      advpipes: ${{ needs.config.outputs.advpipes }}
+      environment: dev
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  build-image:
+    needs: build-package
+    uses: ./.github/workflows/image.yml
+    with:
+      mode: build
+      version: ${{ needs.build-package.outputs.artifact-version }}
+      environment: dev
+
+  deploy-dev:
+    needs: [config, build-package, build-image]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      advpipes: ${{ needs.config.outputs.advpipes }}
+      environment: dev
+      version: ${{ needs.build-package.outputs.artifact-version }}
+
+  taac-dev:
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "🧪 [SIMULADO] TAAC DEV - testes automatizados de aceitação: 12 passaram, 0 falharam"
+
+  open-pr-to-release:
+    needs: [config, build-package, deploy-dev, taac-dev]
+    if: ${{ !failure() && !cancelled() && needs.config.outputs.run == 'true' }}
+    uses: ./.github/workflows/open-pr.yml
+    secrets: inherit
+    with:
+      base: release/${{ needs.build-package.outputs.artifact-version }}
+      create-base-from: main
+      head: develop
+      title: "[HOM] Release ${{ needs.build-package.outputs.artifact-version }} → release/${{ needs.build-package.outputs.artifact-version }}"
+      body: "Deploy em DEV concluído para a versão ${{ needs.build-package.outputs.artifact-version }}. Mergear este PR promove a release para HOM. Aguardando revisão e aprovação humana."

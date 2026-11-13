@@ -1,4 +1,4 @@
-name: terrascan
+name: iac-scan
 
 # Scan de IaC simulado sobre security.terrascan.working-directory
 on:

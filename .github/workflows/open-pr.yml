@@ -1,4 +1,4 @@
-name: create_pr
+name: open-pr
 
 # Abre PR (não-draft, pronto para análise humana). Nunca faz merge.
 # Opcionalmente cria a branch base (ex.: release/<ver>) a partir de outra e um milestone.

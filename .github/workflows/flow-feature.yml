@@ -1,0 +1,57 @@
+name: flow-feature
+
+# push em feature/**: valida nome → build/test → [iac-scan ∥ helm-lint] → abre PR para develop
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Valida prefixo feature/*
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$BRANCH" =~ ^feature/[^/].*$ ]]; then
+            echo "::error::Branch '$BRANCH' deve começar com feature/ (ex: feature/minha-mudanca)"
+            exit 1
+          fi
+
+  config:
+    needs: validate-name
+    uses: ./.github/workflows/config.yml
+    with:
+      environment: dev
+
+  ci:
+    needs: config
+    uses: ./.github/workflows/ci.yml
+    with:
+      advpipes: ${{ needs.config.outputs.advpipes }}
+
+  iac-scan:
+    needs: [config, ci]
+    uses: ./.github/workflows/iac-scan.yml
+    with:
+      advpipes: ${{ needs.config.outputs.advpipes }}
+
+  helm-lint:
+    needs: [config, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "⎈ [SIMULADO] helm lint charts/ (tipo ${{ fromJSON(needs.config.outputs.advpipes).deployK8sDeploymentType }})"
+
+  open-pr-to-develop:
+    needs: [config, ci, iac-scan, helm-lint]
+    if: ${{ !failure() && !cancelled() }}
+    uses: ./.github/workflows/open-pr.yml
+    secrets: inherit
+    with:
+      base: develop
+      head: ${{ github.ref_name }}
+      title: "[DEV] ${{ github.ref_name }} → develop"
+      body: "PR aberto automaticamente pela esteira (build, testes, iac-scan e helm-lint passaram). Aguardando revisão e aprovação humana."

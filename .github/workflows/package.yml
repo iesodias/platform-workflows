@@ -1,24 +1,24 @@
-name: publish
+name: package
 
 # "Registry" de pacotes simulado. Build once, promote many:
-#  - mode=upload : empacota UMA vez, guarda no artifact e num GitHub Release pre-release v<ver>-rc
+#  - mode=build  : empacota UMA vez, guarda no artifact e num GitHub Release pre-release v<ver>-rc
 #  - mode=promote: baixa o MESMO asset do Release e verifica o sha256 (nunca rebuilda)
 on:
   workflow_call:
     inputs:
       mode:
-        description: "upload | promote"
+        description: "build | promote"
         type: string
         required: true
       advpipes:
         type: string
         required: true
       environment:
-        description: "ambiente de destino (dev|hom|prod|hotfix)"
+        description: "ambiente de destino (dev|hom|prod)"
         type: string
         default: ""
       version:
-        description: "versão do artefato (obrigatória em promote; em upload vazio = última tag do repo + 1)"
+        description: "versão do artefato (obrigatória em promote; em build vazio = última tag do repo + 1)"
         type: string
         default: ""
       ref:
@@ -26,15 +26,15 @@ on:
         default: ""
     outputs:
       artifact-version:
-        value: ${{ jobs.publish.outputs.version }}
+        value: ${{ jobs.package.outputs.version }}
       sha256:
-        value: ${{ jobs.publish.outputs.sha256 }}
+        value: ${{ jobs.package.outputs.sha256 }}
 
 permissions:
   contents: write
 
 jobs:
-  publish:
+  package:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.pkg.outputs.version }}
@@ -48,7 +48,7 @@ jobs:
       BUILD_DIR: ${{ fromJSON(inputs.advpipes).buildWorkingDirectory }}
       SHA: ${{ inputs.ref || github.sha }}
     steps:
-      - if: inputs.mode == 'upload'
+      - if: inputs.mode == 'build'
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${VERSION_IN:-}"
-          if [ "$MODE" = "upload" ] && [ -z "$VERSION" ]; then
+          if [ "$MODE" = "build" ] && [ -z "$VERSION" ]; then
             # Re-execução do mesmo commit reutiliza a versão já publicada (idempotente)
             VERSION=$(gh api "repos/$GH_REPO/releases?per_page=100" \
               -q ".[] | select(.tag_name | endswith(\"-rc\")) | select(.target_commitish == \"$SHA\") | .tag_name" \
@@ -80,7 +80,7 @@ jobs:
           TAG="v$VERSION-rc"
 
           case "$MODE" in
-            upload)
+            build)
               tar czf pkg.tgz --exclude=node_modules --exclude=target --exclude=.git -C "$BUILD_DIR" .
               sha256sum pkg.tgz | awk '{print $1"  pkg.tgz"}' > pkg.tgz.sha256
               SUM=$(cut -d' ' -f1 pkg.tgz.sha256)
@@ -97,7 +97,7 @@ jobs:
                 gh release create "$TAG" pkg.tgz pkg.tgz.sha256 --prerelease --target "$SHA" \
                   --title "$VERSION (rc)" --notes "Pacote $VERSION — sha256 \`$SUM\` (build único; promovido entre ambientes sem rebuild)."
               fi
-              echo "📦 [UPLOAD] pacote $VERSION  sha256=$SUM  → Release $TAG"
+              echo "📦 [BUILD] pacote $VERSION  sha256=$SUM  → Release $TAG"
               ;;
             promote)
               [ -n "$VERSION" ] || { echo "::error::version obrigatória em promote"; exit 1; }
@@ -111,7 +111,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha256=$SUM" >> "$GITHUB_OUTPUT"
 
-      - if: inputs.mode == 'upload'
+      - if: inputs.mode == 'build'
         uses: actions/upload-artifact@v4
         with:
           name: package-${{ steps.pkg.outputs.version }}

@@ -1,23 +1,23 @@
-name: auto_tag
+name: tag
 
-# pre-release: registra a validação em HOM no Release v<ver>-rc
-# release-promote: cria a tag final v<ver> + GitHub Release com o MESMO pacote (sem rebuild)
+# rc: registra a validação em HOM no Release v<ver>-rc
+# final: cria a tag final v<ver> + GitHub Release com o MESMO pacote (sem rebuild)
 on:
   workflow_call:
     inputs:
       mode:
-        description: "pre-release | release-promote"
+        description: "rc | final"
         type: string
         required: true
       version:
         type: string
         required: true
       sha:
-        description: "Commit alvo da tag final (release-promote)"
+        description: "Commit alvo da tag final (mode=final)"
         type: string
         default: ""
       note:
-        description: "Nota registrada no pre-release"
+        description: "Nota registrada no Release -rc (mode=rc)"
         type: string
         default: "Validado em HOM"
 
@@ -41,14 +41,14 @@ jobs:
           [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida"; exit 1; }
           RC="v$VERSION-rc"
           case "$MODE" in
-            pre-release)
+            rc)
               gh release view "$RC" >/dev/null 2>&1 || { echo "::error::Release $RC não existe (pacote não foi publicado)"; exit 1; }
               NOTES=$(gh release view "$RC" --json body -q .body)
               gh release edit "$RC" --notes "$NOTES
           ✔ $NOTE: $RUN_URL"
-              echo "🏷️  pre-release $RC atualizado: $NOTE"
+              echo "🏷️  Release $RC atualizado: $NOTE"
               ;;
-            release-promote)
+            final)
               if gh release view "v$VERSION" >/dev/null 2>&1; then
                 echo "::notice::Release final v$VERSION já existe"; exit 0
               fi

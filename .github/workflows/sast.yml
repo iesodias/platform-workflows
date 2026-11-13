@@ -1,4 +1,4 @@
-name: security
+name: sast
 
 # SAST simulado (Fortify). Pode ser não bloqueante (hotfix).
 on:

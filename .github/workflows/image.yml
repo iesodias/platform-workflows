@@ -1,11 +1,11 @@
-name: container
+name: image
 
-# docker build/push (upload) ou retag da mesma imagem (promote) — simulado
+# docker build/push (build) ou retag da mesma imagem (promote) — simulado
 on:
   workflow_call:
     inputs:
       mode:
-        description: "build-push | promote"
+        description: "build | promote"
         type: string
         required: true
       version:
@@ -37,7 +37,7 @@ jobs:
           # digest simulado = sha256 do pacote registrado no Release (mesma imagem em todos os ambientes)
           DIGEST="sha256:$(gh api "repos/$GH_REPO/releases/tags/v$VERSION-rc" -q .body | grep -o '[0-9a-f]\{64\}' | head -1 || true)"
           case "$MODE" in
-            build-push) echo "🐳 [SIMULADO] docker build -t $IMAGE . && docker push $IMAGE  ($DIGEST)" ;;
+            build)   echo "🐳 [SIMULADO] docker build -t $IMAGE . && docker push $IMAGE  ($DIGEST)" ;;
             promote)    echo "🐳 [SIMULADO] retag $IMAGE ($DIGEST) → ${TARGET_ENV^^} (sem rebuild)" ;;
             *) echo "::error::mode inválido"; exit 1 ;;
           esac

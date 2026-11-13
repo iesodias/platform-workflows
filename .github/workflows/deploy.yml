@@ -1,6 +1,6 @@
 name: deploy
 
-# Deploy simulado por ambiente, promote/reject de canary e rollback
+# Deploy simulado por ambiente, rollout/reject de canary e rollback
 on:
   workflow_call:
     inputs:
@@ -15,7 +15,7 @@ on:
         type: string
         required: true
       deploy-type:
-        description: "deploy | promote | reject"
+        description: "deploy | rollout | reject"
         type: string
         default: deploy
       rollback:
@@ -55,18 +55,21 @@ jobs:
           [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida"; exit 1; }
           echo "☸️  cluster=$CLUSTER namespace=$NAMESPACE tipo=$DEPLOY_KIND ambiente=${TARGET_ENV^^} versão=$VERSION ${CHANGE_ID:+GMUD=$CHANGE_ID}"
           if [ "$ROLLBACK" = "true" ]; then
-            PREV=$(gh release list --limit 30 --json tagName -q '.[].tagName' | grep -E '^v[0-9]' | grep -v -- '-rc$' | grep -vx "v$VERSION" | head -1 || true)
-            echo "⏪ [SIMULADO] rollback em ${TARGET_ENV^^}: kubectl rollout undo deployment/app -n $NAMESPACE (última execução com sucesso: ${PREV:-n/a})"
+            # versão de destino = maior release final abaixo da versão revertida
+            PREV=$(gh release list --limit 100 --json tagName -q '.[].tagName' \
+              | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | { cat; echo "$VERSION"; } \
+              | sort -V | uniq | awk -v v="$VERSION" '$0 == v { print p; exit } { p = $0 }')
+            echo "⏪ [SIMULADO] rollback da versão $VERSION em ${TARGET_ENV^^}: kubectl rollout undo deployment/app -n $NAMESPACE (volta para: ${PREV:+v}${PREV:-n/a})"
             exit 0
           fi
           case "$DEPLOY_TYPE" in
             deploy)
               if [ "$TARGET_ENV" = "prod" ]; then
-                echo "🐤 [SIMULADO] deploy canary ${PERCENTAGE}% da versão $VERSION — aguardando promote/reject via Issue"
+                echo "🐤 [SIMULADO] deploy canary ${PERCENTAGE}% da versão $VERSION — aguardando rollout/reject via Issue"
               else
                 echo "🚀 [SIMULADO] helm upgrade app --version $VERSION -n $NAMESPACE (${TARGET_ENV^^})"
               fi ;;
-            promote) echo "✅ [SIMULADO] promote: 100% do tráfego para $VERSION em ${TARGET_ENV^^}" ;;
+            rollout) echo "✅ [SIMULADO] rollout: 100% do tráfego para $VERSION em ${TARGET_ENV^^}" ;;
             reject)  echo "🛑 [SIMULADO] reject: tráfego volta 100% para a versão anterior em ${TARGET_ENV^^}" ;;
             *) echo "::error::deploy-type inválido: $DEPLOY_TYPE"; exit 1 ;;
           esac

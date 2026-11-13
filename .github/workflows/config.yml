@@ -1,4 +1,4 @@
-name: source_control
+name: config
 
 # Lê o .advpipes.yml da raiz do repo, valida, achata para camelCase e resolve os valores do ambiente.
 # Também aplica "guards" do evento (PR mergeado, branch de origem, etc.) e expõe outputs.run.
@@ -6,7 +6,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: "dev | hom | prod | hotfix"
+        description: "dev | hom | prod"
         type: string
         default: ""
       guard:
@@ -84,8 +84,7 @@ jobs:
           def camel: map(tostring | kc) | .[0] + (.[1:] | map(cap) | join(""));
           . as $root
           | ([paths(scalars) as $p | {key: ($p | camel), value: ($root | getpath($p))}] | from_entries) as $flat
-          | ($env | if . == "hotfix" then "prod" else . end) as $e
-          | ($e | cap) as $E
+          | ($env | cap) as $E
           | $flat + {environment: $env,
                      cluster:    $flat["deployK8s\($E)Cluster"],
                      namespace:  $flat["deployK8s\($E)Namespace"],
