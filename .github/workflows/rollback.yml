@@ -34,7 +34,14 @@ jobs:
         run: |
           set -euo pipefail
           gh issue comment "$ISSUE_NUMBER" --body "⏳ Acompanhe a execução: $RUN_URL"
-          fail() { gh issue comment "$ISSUE_NUMBER" --body "❌ $1"; echo "reported=true" >> "$GITHUB_OUTPUT"; exit 1; }
+          # Erro de preenchimento: explica na issue e fecha (o gatilho é a abertura; corrigir = abrir outra)
+          fail() {
+            gh issue comment "$ISSUE_NUMBER" --body "❌ $1
+
+          Nada foi executado. Abra uma nova issue com os dados corrigidos."
+            gh issue close "$ISSUE_NUMBER" --reason "not planned" >/dev/null || true
+            echo "reported=true" >> "$GITHUB_OUTPUT"; exit 1
+          }
           # Campos no formato ### >>Campo<< (delimitadores >> e <<)
           field() { awk -v k=">>$1<<" '$0=="### "k{f=1;next} /^### /{f=0} f' <<<"$BODY" | sed '/^[[:space:]]*$/d' | head -c 200 | tr -d '\r' | head -1; }
 
@@ -58,6 +65,8 @@ jobs:
 
           # Ref de onde ler o .advpipes.yml: release/<ver> enquanto existir; depois da tag final a branch
           # é removida, então usa a tag v<ver> (ou o -rc)
+          [ "$ENVIRONMENT" != "prod" ] || [ -n "$GMUD" ] || fail "O campo **GMUD** é obrigatório quando o Environment é \`prod\`."
+
           if [ "$ENVIRONMENT" = "dev" ]; then
             BRANCH=develop
           elif gh api "repos/$GH_REPO/git/ref/heads/release/$VERSION" >/dev/null 2>&1; then
