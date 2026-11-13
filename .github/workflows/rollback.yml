@@ -56,7 +56,19 @@ jobs:
             *) fail "Issue sem label promote/rollback." ;;
           esac
 
-          if [ "$ENVIRONMENT" = "dev" ]; then BRANCH=develop; else BRANCH="release/$VERSION"; fi
+          # Ref de onde ler o .advpipes.yml: release/<ver> enquanto existir; depois da tag final a branch
+          # é removida, então usa a tag v<ver> (ou o -rc)
+          if [ "$ENVIRONMENT" = "dev" ]; then
+            BRANCH=develop
+          elif gh api "repos/$GH_REPO/git/ref/heads/release/$VERSION" >/dev/null 2>&1; then
+            BRANCH="release/$VERSION"
+          elif gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            BRANCH="v$VERSION"
+          elif gh api "repos/$GH_REPO/git/ref/tags/v$VERSION-rc" >/dev/null 2>&1; then
+            BRANCH="v$VERSION-rc"
+          else
+            fail "Versão $VERSION não encontrada (sem branch release/$VERSION nem tag v$VERSION)."
+          fi
           {
             echo "action=$ACTION"
             echo "environment=$ENVIRONMENT"

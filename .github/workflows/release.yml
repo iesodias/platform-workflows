@@ -1,11 +1,13 @@
 name: release
 
 # PR mergeado em main vindo de release/* ou hotfix*: tag final + GitHub Release (mesmo pacote)
+# Só libera a tag se o deploy em PROD daquele commit foi executado (marcador deployed-prod:<sha> no PR).
 on:
   workflow_call:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   info:
@@ -16,8 +18,12 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BODY: ${{ github.event.pull_request.body }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - id: v
         run: |
@@ -26,6 +32,19 @@ jobs:
           [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão não identificada"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Exige deploy em PROD antes da tag final
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh pr view "$PR_NUMBER" --json comments -q '.comments[].body' | grep -qF "deployed-prod:$HEAD_SHA"; then
+            echo "✅ Deploy em PROD de ${HEAD_SHA::7} confirmado"
+            exit 0
+          fi
+          gh pr comment "$PR_NUMBER" --body "❌ Este PR foi mergeado **sem deploy em PROD** do commit \`${HEAD_SHA::7}\` (o checkbox \"Aprovar deploy em PROD\" não foi marcado ou o deploy falhou). A tag final \`v$VERSION\` **não** foi criada."
+          echo "::error::PR #$PR_NUMBER mergeado em main sem deploy em PROD de ${HEAD_SHA::7}; tag final v$VERSION não criada"
+          exit 1
+
   release-promote:
     needs: info
     uses: ./.github/workflows/auto_tag.yml
@@ -33,3 +52,17 @@ jobs:
       mode: release-promote
       version: ${{ needs.info.outputs.version }}
       sha: ${{ github.event.pull_request.merge_commit_sha }}
+
+  delete-release-branch:
+    needs: release-promote
+    if: startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - run: |
+          gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$HEAD_REF" >/dev/null 2>&1 \
+            && echo "🧹 branch $HEAD_REF removida (a tag final preserva o histórico)" \
+            || echo "::notice::branch $HEAD_REF não removida (já não existe?)"

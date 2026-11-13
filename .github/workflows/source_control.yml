@@ -10,7 +10,7 @@ on:
         type: string
         default: ""
       guard:
-        description: "none | merged | merged-not-prerelease | prod-head | differs-from-main"
+        description: "none | merged | prod-head"
         type: string
         default: none
       ref:
@@ -56,13 +56,8 @@ jobs:
             none) ;;
             merged)
               [ "$PR_MERGED" = "true" ] || run=false ;;
-            merged-not-prerelease)
-              { [ "$PR_MERGED" = "true" ] && [ "$HEAD_REF" != "pre-release" ]; } || run=false ;;
             prod-head)
               case "$HEAD_REF" in release/*|hotfix*) ;; *) run=false ;; esac ;;
-            differs-from-main)
-              MAIN_SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" -q .object.sha)
-              [ "$MAIN_SHA" != "$SHA" ] || run=false ;;
             *) echo "::error::guard desconhecido: $GUARD"; exit 1 ;;
           esac
           echo "guard=$GUARD run=$run"
@@ -79,10 +74,6 @@ jobs:
         run: |
           set -euo pipefail
           CFG=.advpipes.yml
-          if [ ! -f "$CFG" ] && [ -f .iupipes.yml ]; then
-            echo "::warning::.iupipes.yml é o nome legado; renomeie para .advpipes.yml"
-            CFG=.iupipes.yml
-          fi
           [ -f "$CFG" ] || { echo "::error::.advpipes.yml não encontrado na raiz"; exit 1; }
           for k in .project.language .build .deploy; do
             [ "$(yq "$k // \"\"" "$CFG")" != "" ] || { echo "::error::$CFG sem a chave obrigatória $k"; exit 1; }

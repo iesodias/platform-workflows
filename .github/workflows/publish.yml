@@ -18,7 +18,7 @@ on:
         type: string
         default: ""
       version:
-        description: "versão do artefato (obrigatória em promote; em upload vazio = 1.0.<run_number>)"
+        description: "versão do artefato (obrigatória em promote; em upload vazio = última tag do repo + 1)"
         type: string
         default: ""
       ref:
@@ -46,8 +46,7 @@ jobs:
       VERSION_IN: ${{ inputs.version }}
       TARGET_ENV: ${{ inputs.environment }}
       BUILD_DIR: ${{ fromJSON(inputs.advpipes).buildWorkingDirectory }}
-      RUN_NUMBER: ${{ github.run_number }}
-      SHA: ${{ github.sha }}
+      SHA: ${{ inputs.ref || github.sha }}
     steps:
       - if: inputs.mode == 'upload'
         uses: actions/checkout@v4
@@ -59,8 +58,23 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${VERSION_IN:-}"
-          if [ "$MODE" = "upload" ]; then
-            [ -n "$VERSION" ] || VERSION="1.0.$RUN_NUMBER"
+          if [ "$MODE" = "upload" ] && [ -z "$VERSION" ]; then
+            # Re-execução do mesmo commit reutiliza a versão já publicada (idempotente)
+            VERSION=$(gh api "repos/$GH_REPO/releases?per_page=100" \
+              -q ".[] | select(.tag_name | endswith(\"-rc\")) | select(.target_commitish == \"$SHA\") | .tag_name" \
+              | head -1 | sed -e 's/^v//' -e 's/-rc$//')
+            if [ -z "$VERSION" ]; then
+              # Versão única por repo: maior tag vX.Y.Z (final ou -rc) + 1 no patch
+              LAST=$(gh api "repos/$GH_REPO/git/matching-refs/tags/v" --paginate -q '.[].ref' \
+                | sed 's#^refs/tags/v##' | { grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-rc)?$' || true; } \
+                | sed 's/-rc$//' | sort -V | tail -1)
+              if [ -z "$LAST" ]; then
+                VERSION=1.0.0
+              else
+                IFS=. read -r MAJOR MINOR PATCH <<<"$LAST"
+                VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              fi
+            fi
           fi
           [[ "$VERSION" =~ ^[0-9A-Za-z._-]{1,64}$ ]] || { echo "::error::Versão inválida: '$VERSION'"; exit 1; }
           TAG="v$VERSION-rc"
@@ -71,7 +85,14 @@ jobs:
               sha256sum pkg.tgz | awk '{print $1"  pkg.tgz"}' > pkg.tgz.sha256
               SUM=$(cut -d' ' -f1 pkg.tgz.sha256)
               if gh release view "$TAG" >/dev/null 2>&1; then
-                echo "::notice::Release $TAG já existe; pacote não é sobrescrito (build once)"
+                EXISTING=$(gh release view "$TAG" --json targetCommitish -q .targetCommitish)
+                if [ "$EXISTING" != "$SHA" ]; then
+                  echo "::error::Release $TAG já existe para outro commit ($EXISTING); colisão de versão — o pacote não será reaproveitado"
+                  exit 1
+                fi
+                mkdir -p dl && gh release download "$TAG" -D dl -p pkg.tgz -p pkg.tgz.sha256
+                cp dl/pkg.tgz dl/pkg.tgz.sha256 . && SUM=$(cut -d' ' -f1 pkg.tgz.sha256)
+                echo "::notice::Release $TAG já existe para este commit; pacote reaproveitado (build once)"
               else
                 gh release create "$TAG" pkg.tgz pkg.tgz.sha256 --prerelease --target "$SHA" \
                   --title "$VERSION (rc)" --notes "Pacote $VERSION — sha256 \`$SUM\` (build único; promovido entre ambientes sem rebuild)."

@@ -13,7 +13,7 @@ jobs:
     uses: ./.github/workflows/source_control.yml
     with:
       environment: dev
-      guard: merged-not-prerelease
+      guard: merged
       ref: ${{ github.event.pull_request.merge_commit_sha }}
 
   ci:
