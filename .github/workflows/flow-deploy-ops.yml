@@ -12,8 +12,7 @@ permissions:
 jobs:
   parse-form:
     if: >-
-      (contains(github.event.issue.labels.*.name, 'canary') || contains(github.event.issue.labels.*.name, 'rollback')) &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+      (contains(github.event.issue.labels.*.name, 'canary') || contains(github.event.issue.labels.*.name, 'rollback'))
     runs-on: ubuntu-latest
     outputs:
       action: ${{ steps.parse.outputs.action }}
@@ -28,6 +27,8 @@ jobs:
       # Corpo da issue é input não confiável: só via env, lido como "$BODY" no shell
       BODY: ${{ github.event.issue.body }}
       LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+      AUTHOR: ${{ github.event.issue.user.login }}
+      ASSOC: ${{ github.event.issue.author_association }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - id: parse
@@ -42,6 +43,12 @@ jobs:
             gh issue close "$ISSUE_NUMBER" --reason "not planned" >/dev/null || true
             echo "reported=true" >> "$GITHUB_OUTPUT"; exit 1
           }
+          # Só quem tem escrita no repo executa (não usa author_association: em org com
+          # participação privada ela não vem como MEMBER)
+          PERM=$(gh api "repos/$GH_REPO/collaborators/$AUTHOR/permission" -q .permission 2>/dev/null || echo none)
+          echo "autor=$AUTHOR author_association=$ASSOC permissão=$PERM"
+          case "$PERM" in admin|write) ;; *) fail "@$AUTHOR não tem permissão de escrita neste repo para executar canary/rollback." ;; esac
+
           # Campos no formato ### >>Campo<< (delimitadores >> e <<)
           field() { awk -v k=">>$1<<" '$0=="### "k{f=1;next} /^### /{f=0} f' <<<"$BODY" | sed '/^[[:space:]]*$/d' | head -c 200 | tr -d '\r' | head -1; }
 
