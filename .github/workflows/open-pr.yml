@@ -66,8 +66,16 @@ jobs:
               || gh api -X POST "repos/$GH_REPO/milestones" -f title="$MILESTONE" >/dev/null
             ARGS+=(--milestone "$MILESTONE")
           fi
-          if URL=$(gh pr create "${ARGS[@]}"); then
+          if URL=$(gh pr create "${ARGS[@]}" 2>"$RUNNER_TEMP/pr.err"); then
             echo "✅ PR aberto (aguardando análise humana): $URL"; echo "url=$URL" >> "$GITHUB_OUTPUT"
+          elif grep -qi "no commits between" "$RUNNER_TEMP/pr.err"; then
+            echo "::notice::PR $HEAD -> $BASE não aberto: não há diferenças entre as branches"
           else
-            echo "::notice::PR $HEAD -> $BASE não aberto (sem diferenças entre as branches?)"
+            cat "$RUNNER_TEMP/pr.err" >&2
+            if grep -qi "not permitted to create or approve pull requests" "$RUNNER_TEMP/pr.err"; then
+              echo "::error::O GitHub Actions não tem permissão para abrir PRs. Ligue \"Allow GitHub Actions to create and approve pull requests\" em Settings → Actions → General (no repo e, se for org, na org)."
+            else
+              echo "::error::Falha ao abrir o PR $HEAD -> $BASE (detalhes acima)"
+            fi
+            exit 1
           fi

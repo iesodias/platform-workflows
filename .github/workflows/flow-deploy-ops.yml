@@ -13,7 +13,7 @@ jobs:
   parse-form:
     if: >-
       (contains(github.event.issue.labels.*.name, 'canary') || contains(github.event.issue.labels.*.name, 'rollback')) &&
-      contains(fromJSON('["OWNER","COLLABORATOR"]'), github.event.issue.author_association)
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
     runs-on: ubuntu-latest
     outputs:
       action: ${{ steps.parse.outputs.action }}
