@@ -12,12 +12,12 @@ jobs:
   validate-name:
     runs-on: ubuntu-latest
     steps:
-      - name: Valida convenção feature/HIS-XXXX-NNNNNNN-descricao
+      - name: Valida prefixo feature/*
         env:
           BRANCH: ${{ github.ref_name }}
         run: |
-          if [[ ! "$BRANCH" =~ ^feature/HIS-[0-9]{4}-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
-            echo "::error::Branch '$BRANCH' fora do padrão feature/HIS-XXXX-NNNNNNN-descricao (ex: feature/HIS-2025-2147154-cobranca-pre-atraso)"
+          if [[ ! "$BRANCH" =~ ^feature/[^/].*$ ]]; then
+            echo "::error::Branch '$BRANCH' deve começar com feature/ (ex: feature/minha-mudanca)"
             exit 1
           fi
 
